@@ -1,0 +1,77 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+};
+
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { command_id, status, error_message } = await req.json();
+
+    if (!command_id || !status) {
+      return new Response(
+        JSON.stringify({ error: "command_id and status are required" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const validStatuses = ["pending", "executing", "completed", "failed"];
+
+    if (!validStatuses.includes(status)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid status" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const updateData: any = {
+      status: status,
+      executed_at: new Date().toISOString(),
+    };
+
+    if (error_message) {
+      updateData.error_message = error_message;
+    }
+
+    const { data, error } = await supabase
+      .from("commands")
+      .update(updateData)
+      .eq("id", command_id)
+      .select();
+
+    if (error) {
+      throw error;
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, command: data }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
