@@ -6,6 +6,7 @@ class SupabaseClient {
   private anonKey: string;
   private timeout: number;
   private maxRetries: number;
+  private accessToken: string | null = null;
 
   constructor() {
     this.baseUrl = API_CONFIG.SUPABASE_URL;
@@ -15,26 +16,48 @@ class SupabaseClient {
   }
 
   private getHeaders(): HeadersInit {
-    return {
+    const headers: HeadersInit = {
       'Content-Type': 'application/json',
       apikey: this.anonKey,
-      Authorization: `Bearer ${this.anonKey}`,
     };
+
+    if (this.accessToken) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`;
+    } else {
+      headers['Authorization'] = `Bearer ${this.anonKey}`;
+    }
+
+    return headers;
+  }
+
+  setAccessToken(token: string | null) {
+    this.accessToken = token;
+  }
+
+  getAccessToken(): string | null {
+    return this.accessToken;
   }
 
   private async request<T>(
     method: string,
     endpoint: string,
-    body?: any
+    body?: any,
+    useAuth: boolean = true
   ): Promise<ApiResponse<T>> {
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
+        const headers = useAuth ? this.getHeaders() : {
+          'Content-Type': 'application/json',
+          apikey: this.anonKey,
+          'Authorization': `Bearer ${this.anonKey}`,
+        };
+
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
           method,
-          headers: this.getHeaders(),
+          headers,
           body: body ? JSON.stringify(body) : undefined,
           signal: controller.signal,
         });
@@ -45,7 +68,7 @@ class SupabaseClient {
           const errorData = await response.json().catch(() => ({}));
           return {
             data: null,
-            error: errorData.message || `HTTP error ${response.status}`,
+            error: errorData.message || errorData.error_description || `HTTP error ${response.status}`,
           };
         }
 
@@ -65,6 +88,27 @@ class SupabaseClient {
     return { data: null, error: 'Max retries exceeded' };
   }
 
+  // ---- AUTH ----
+  async signUp(email: string, password: string): Promise<ApiResponse<any>> {
+    return this.request('POST', '/auth/v1/signup', { email, password }, false);
+  }
+
+  async signIn(email: string, password: string): Promise<ApiResponse<any>> {
+    return this.request('POST', '/auth/v1/token?grant_type=password', { email, password }, false);
+  }
+
+  async signOut(): Promise<void> {
+    this.accessToken = null;
+  }
+
+  async getCurrentUser(): Promise<ApiResponse<any>> {
+    if (!this.accessToken) {
+      return { data: null, error: 'Not authenticated' };
+    }
+    return this.request('GET', '/auth/v1/user');
+  }
+
+  // ---- REST ----
   async get<T>(endpoint: string): Promise<ApiResponse<T>> {
     return this.request<T>('GET', endpoint);
   }

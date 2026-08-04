@@ -295,11 +295,13 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontWeight: '600',
     flex: 1,
+    textTransform: 'uppercase',
   },
   historyStatus: {
     ...TYPOGRAPHY.caption,
     fontWeight: '500',
     marginRight: SPACING.sm,
+    textTransform: 'uppercase',
   },
   historyTime: {
     ...TYPOGRAPHY.caption,

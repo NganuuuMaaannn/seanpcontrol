@@ -1,152 +1,338 @@
 // SeanPControl Firmware for ESP32
-// Simplified version to avoid memory issues
+// Self-registering: app sends config, ESP32 registers in Supabase
 
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <WebServer.h>
+#include <Preferences.h>
 
-// Configuration - EDIT THESE
-#define WIFI_SSID "DoinogWIFI_2.4GHz"
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
-#define SUPABASE_URL "https://ggqjcyqwevpsbrbcuriv.supabase.co"
-#define SUPABASE_KEY "YOUR_SUPABASE_ANON_KEY"
-#define DEVICE_UUID "f7d39f0d-6cab-4b96-9c60-37af0da1347b"
-#define DEVICE_ID "7c173869-7205-44a7-8ea9-c50d96376e7c"
+// ---- PIN CONFIG ----
+#define GPIO_POWER    26
+#define GPIO_RESET    27
+#define LED_GREEN     32
+#define LED_RED       33
+#define BTN_RESET     25
 
-#define GPIO_POWER 26
-#define GPIO_RESET 27
+// ---- HOTSPOT CONFIG ----
+#define AP_SSID       "SeanPControl-Setup"
+#define AP_PASS       "12345678"
+
+// ---- GLOBALS ----
+Preferences preferences;
+WebServer server(80);
+bool wifiConfigured = false;
+bool setupMode = false;
+String wifiSSID = "";
+String wifiPassword = "";
+String deviceUuid = "";
+String deviceId = "";
+String supabaseUrl = "";
+String supabaseKey = "";
+String deviceName = "";
+String userId = "";
 
 unsigned long lastPoll = 0;
 unsigned long lastHeartbeat = 0;
+unsigned long lastLedBlink = 0;
+bool ledState = false;
+bool deviceRegistered = false;
 
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  Serial.println("SeanPControl Starting...");
+unsigned long resetPressStart = 0;
+bool resetPressed = false;
 
-  pinMode(GPIO_POWER, OUTPUT);
-  pinMode(GPIO_RESET, OUTPUT);
-  digitalWrite(GPIO_POWER, LOW);
-  digitalWrite(GPIO_RESET, LOW);
-  Serial.println("GPIO OK");
+enum DeviceStatus { STATUS_OK, STATUS_ERROR, STATUS_RESETTING, STATUS_CONFIG };
+DeviceStatus currentStatus = STATUS_OK;
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("WiFi connecting");
+// ---- LED ----
+void setLedOk() { currentStatus = STATUS_OK; }
+void setLedError() { currentStatus = STATUS_ERROR; }
+void setLedReset() { currentStatus = STATUS_RESETTING; }
+void setLedConfig() { currentStatus = STATUS_CONFIG; }
+
+void updateLeds() {
+  unsigned long now = millis();
+  switch (currentStatus) {
+    case STATUS_OK:
+      if (now - lastLedBlink > 1000) {
+        lastLedBlink = now;
+        ledState = !ledState;
+        digitalWrite(LED_GREEN, ledState ? HIGH : LOW);
+        digitalWrite(LED_RED, LOW);
+      }
+      break;
+    case STATUS_ERROR:
+      digitalWrite(LED_RED, HIGH);
+      digitalWrite(LED_GREEN, LOW);
+      break;
+    case STATUS_RESETTING:
+      if (now - lastLedBlink > 200) {
+        lastLedBlink = now;
+        ledState = !ledState;
+        digitalWrite(LED_RED, ledState ? HIGH : LOW);
+        digitalWrite(LED_GREEN, LOW);
+      }
+      break;
+    case STATUS_CONFIG:
+      if (now - lastLedBlink > 500) {
+        lastLedBlink = now;
+        ledState = !ledState;
+        digitalWrite(LED_GREEN, ledState ? HIGH : LOW);
+        digitalWrite(LED_RED, ledState ? LOW : HIGH);
+      }
+      break;
+  }
+}
+
+// ---- HANDLERS ----
+void handleScan() {
+  int n = WiFi.scanNetworks();
+  DynamicJsonDocument doc(2048);
+  JsonArray arr = doc.to<JsonArray>();
+  for (int i = 0; i < n; i++) {
+    JsonObject obj = arr.createNestedObject();
+    obj["ssid"] = WiFi.SSID(i);
+    obj["rssi"] = WiFi.RSSI(i);
+    obj["secure"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+  }
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+  WiFi.scanDelete();
+}
+
+void handleSetup() {
+  if (server.hasArg("plain")) {
+    DynamicJsonDocument doc(1024);
+    if (!deserializeJson(doc, server.arg("plain"))) {
+      wifiSSID = doc["ssid"].as<String>();
+      wifiPassword = doc["pass"].as<String>();
+      deviceUuid = doc["uuid"].as<String>();
+      userId = doc["userid"].as<String>();
+      supabaseUrl = doc["supabaseurl"].as<String>();
+      supabaseKey = doc["supabasekey"].as<String>();
+      deviceName = doc["devicename"].as<String>();
+
+      // Save everything
+      preferences.begin("config", false);
+      preferences.putString("ssid", wifiSSID);
+      preferences.putString("password", wifiPassword);
+      preferences.putString("uuid", deviceUuid);
+      preferences.putString("userid", userId);
+      preferences.putString("supabaseurl", supabaseUrl);
+      preferences.putString("supabasekey", supabaseKey);
+      preferences.putString("devicename", deviceName);
+      preferences.putBool("configured", true);
+      preferences.end();
+
+      Serial.println("All config saved!");
+      Serial.print("UUID: "); Serial.println(deviceUuid);
+      Serial.print("User: "); Serial.println(userId);
+
+      server.send(200, "application/json", "{\"ok\":true}");
+      delay(1000);
+      ESP.restart();
+    } else {
+      server.send(400, "application/json", "{\"error\":\"invalid json\"}");
+    }
+  } else {
+    server.send(400, "application/json", "{\"error\":\"no data\"}");
+  }
+}
+
+void handleSave() {
+  if (server.hasArg("plain")) {
+    DynamicJsonDocument doc(512);
+    if (!deserializeJson(doc, server.arg("plain"))) {
+      wifiSSID = doc["ssid"].as<String>();
+      wifiPassword = doc["pass"].as<String>();
+
+      preferences.begin("config", false);
+      preferences.putString("ssid", wifiSSID);
+      preferences.putString("password", wifiPassword);
+      preferences.putBool("configured", true);
+      preferences.end();
+
+      server.send(200, "application/json", "{\"ok\":true}");
+      Serial.println("WiFi saved, restarting...");
+      delay(1000);
+      ESP.restart();
+    } else {
+      server.send(400, "application/json", "{\"error\":\"invalid json\"}");
+    }
+  } else {
+    server.send(400, "application/json", "{\"error\":\"no data\"}");
+  }
+}
+
+void handleStatus() {
+  DynamicJsonDocument doc(256);
+  doc["setup_mode"] = setupMode;
+  doc["wifi_connected"] = WiFi.status() == WL_CONNECTED;
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+}
+
+// ---- CONFIG MODE ----
+void startConfigMode() {
+  Serial.println("Starting config mode...");
+  setupMode = true;
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  delay(500);
+  Serial.print("AP IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  server.on("/scan", HTTP_GET, handleScan);
+  server.on("/save", HTTP_POST, handleSave);
+  server.on("/setup", HTTP_POST, handleSetup);
+  server.on("/status", HTTP_GET, handleStatus);
+  server.begin();
+
+  setLedConfig();
+  Serial.println("Connect to hotspot and open 192.168.4.1");
+}
+
+// ---- WIFI ----
+bool connectWiFi() {
+  Serial.print("Connecting to ");
+  Serial.println(wifiSSID);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
+
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 50) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
     delay(500);
     Serial.print(".");
     attempts++;
   }
-  
+
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println(" OK");
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
-  } else {
-    Serial.println(" FAILED");
-    Serial.println("Restarting...");
-    delay(3000);
-    ESP.restart();
+    return true;
   }
-
-  // Send online status on startup
-  updateStatus("online");
-  
-  Serial.println("Setup done");
+  Serial.println(" FAILED");
+  return false;
 }
 
-void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    WiFi.reconnect();
-    delay(5000);
-    return;
+// ---- SUPABASE ----
+bool registerDevice() {
+  if (deviceUuid.length() == 0 || supabaseUrl.length() == 0) {
+    Serial.println("No UUID or Supabase URL, skipping registration");
+    return false;
   }
 
-  unsigned long now = millis();
+  Serial.println("Registering device in Supabase...");
 
-  // Poll commands every 2 seconds
-  if (now - lastPoll > 2000) {
-    lastPoll = now;
-    pollCommands();
+  HTTPClient http;
+  String url = supabaseUrl + "/rest/v1/devices";
+
+  http.begin(url);
+  http.addHeader("apikey", supabaseKey);
+  http.addHeader("Authorization", "Bearer " + supabaseKey);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Prefer", "return=representation");
+
+  DynamicJsonDocument body(512);
+  body["id"] = deviceUuid;
+  body["uuid"] = deviceUuid;
+  body["device_name"] = deviceName;
+  body["status"] = "online";
+  body["user_id"] = userId;
+  body["firmware_version"] = "1.0.0";
+  body["ip_address"] = WiFi.localIP().toString();
+  body["wifi_signal"] = WiFi.RSSI();
+
+  String payload;
+  serializeJson(body, payload);
+
+  int code = http.POST(payload);
+  String response = http.getString();
+  http.end();
+
+  Serial.print("Register response: ");
+  Serial.println(code);
+  Serial.println(response);
+
+  if (code == 200 || code == 201) {
+    deviceId = deviceUuid;
+    Serial.println("Device registered!");
+    return true;
   }
 
-  // Heartbeat + status every 30 seconds
-  if (now - lastHeartbeat > 30000) {
-    lastHeartbeat = now;
-    heartbeat();
-    updateStatus("online");
+  // If 409 conflict, device already exists - that's OK
+  if (code == 409) {
+    deviceId = deviceUuid;
+    Serial.println("Device already exists, continuing...");
+    return true;
   }
 
-  delay(10);
+  Serial.println("Registration failed");
+  return false;
 }
 
 void updateStatus(const char* status) {
+  if (WiFi.status() != WL_CONNECTED || deviceUuid.length() == 0 || supabaseUrl.length() == 0) return;
+
   HTTPClient http;
-  String url = String(SUPABASE_URL) + "/rest/v1/devices?uuid=eq." + DEVICE_UUID;
-  
+  String url = supabaseUrl + "/rest/v1/devices?uuid=eq." + deviceUuid;
   http.begin(url);
-  http.addHeader("apikey", SUPABASE_KEY);
-  http.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
+  http.addHeader("apikey", supabaseKey);
+  http.addHeader("Authorization", "Bearer " + supabaseKey);
   http.addHeader("Content-Type", "application/json");
-  
+
   String payload = "{\"status\":\"" + String(status) + "\",\"last_seen\":\"now()\",\"ip_address\":\"" + WiFi.localIP().toString() + "\",\"wifi_signal\":" + String(WiFi.RSSI()) + "}";
   http.sendRequest("PATCH", payload);
   http.end();
 }
 
 void pollCommands() {
+  if (WiFi.status() != WL_CONNECTED || deviceUuid.length() == 0 || supabaseUrl.length() == 0) return;
+
   HTTPClient http;
-  String url = String(SUPABASE_URL) + "/rest/v1/commands?device_id=eq." + DEVICE_ID + "&status=eq.pending&limit=1";
-  
+  String url = supabaseUrl + "/rest/v1/commands?device_id=eq." + deviceUuid + "&status=eq.pending&limit=1";
   http.begin(url);
-  http.addHeader("apikey", SUPABASE_KEY);
-  http.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
-  
+  http.addHeader("apikey", supabaseKey);
+  http.addHeader("Authorization", "Bearer " + supabaseKey);
+
   int code = http.GET();
-  
   if (code == 200) {
     String body = http.getString();
     http.end();
-    
     if (body == "[]") return;
-    
+
     DynamicJsonDocument doc(1024);
-    DeserializationError err = deserializeJson(doc, body);
-    
-    if (err) {
-      Serial.println("JSON error");
-      return;
-    }
-    
+    if (deserializeJson(doc, body)) return;
+
     const char* cmdId = doc[0]["id"];
     const char* cmdType = doc[0]["command"];
-    
+
     Serial.print("CMD: ");
     Serial.println(cmdType);
-    
-    // Execute - pulse HIGH to simulate button press
+
     if (strcmp(cmdType, "power") == 0) {
       digitalWrite(GPIO_POWER, HIGH);
-      delay(300);
+      delay(500);
       digitalWrite(GPIO_POWER, LOW);
     } else if (strcmp(cmdType, "reset") == 0) {
       digitalWrite(GPIO_RESET, HIGH);
-      delay(300);
+      delay(500);
       digitalWrite(GPIO_RESET, LOW);
     }
-    
-    // Update command status
-    String patchUrl = String(SUPABASE_URL) + "/rest/v1/commands?id=eq." + cmdId;
+
+    String patchUrl = supabaseUrl + "/rest/v1/commands?id=eq." + cmdId;
     HTTPClient http2;
     http2.begin(patchUrl);
-    http2.addHeader("apikey", SUPABASE_KEY);
-    http2.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
+    http2.addHeader("apikey", supabaseKey);
+    http2.addHeader("Authorization", "Bearer " + supabaseKey);
     http2.addHeader("Content-Type", "application/json");
-    String payload = "{\"status\":\"completed\",\"executed_at\":\"now()\"}";
-    http2.sendRequest("PATCH", payload);
+    http2.sendRequest("PATCH", "{\"status\":\"completed\",\"executed_at\":\"now()\"}");
     http2.end();
-    
     Serial.println("DONE");
   } else {
     http.end();
@@ -154,17 +340,100 @@ void pollCommands() {
 }
 
 void heartbeat() {
-  HTTPClient http;
-  String url = String(SUPABASE_URL) + "/rest/v1/devices?uuid=eq." + DEVICE_UUID;
-  
-  http.begin(url);
-  http.addHeader("apikey", SUPABASE_KEY);
-  http.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
-  http.addHeader("Content-Type", "application/json");
-  
-  String payload = "{\"last_seen\":\"now()\"}";
-  http.sendRequest("PATCH", payload);
-  http.end();
-  
+  if (WiFi.status() != WL_CONNECTED) { setLedError(); return; }
+  updateStatus("online");
   Serial.println("HB");
+  setLedOk();
+}
+
+// ---- RESET BUTTON ----
+void checkResetButton() {
+  bool pressed = (digitalRead(BTN_RESET) == LOW);
+  if (pressed && !resetPressed) { resetPressStart = millis(); resetPressed = true; }
+  if (resetPressed && pressed && (millis() - resetPressStart >= 5000)) {
+    Serial.println("Reset!");
+    setLedReset();
+    for (int i = 0; i < 10; i++) { digitalWrite(LED_RED, HIGH); delay(100); digitalWrite(LED_RED, LOW); delay(100); }
+    preferences.begin("config", false); preferences.clear(); preferences.end();
+    ESP.restart();
+  }
+  if (!pressed) resetPressed = false;
+}
+
+// ---- SETUP ----
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("SeanPControl Starting...");
+
+  pinMode(GPIO_POWER, OUTPUT);
+  pinMode(GPIO_RESET, OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
+  pinMode(LED_RED, OUTPUT);
+  pinMode(BTN_RESET, INPUT_PULLUP);
+  digitalWrite(GPIO_POWER, LOW);
+  digitalWrite(GPIO_RESET, LOW);
+  digitalWrite(LED_GREEN, LOW);
+  digitalWrite(LED_RED, LOW);
+
+  // Load config
+  preferences.begin("config", true);
+  wifiConfigured = preferences.getBool("configured", false);
+  if (wifiConfigured) {
+    wifiSSID = preferences.getString("ssid", "");
+    wifiPassword = preferences.getString("password", "");
+    deviceUuid = preferences.getString("uuid", "");
+    userId = preferences.getString("userid", "");
+    supabaseUrl = preferences.getString("supabaseurl", "");
+    supabaseKey = preferences.getString("supabasekey", "");
+    deviceName = preferences.getString("devicename", "SeanPControl Device");
+  }
+  preferences.end();
+
+  if (!wifiConfigured || wifiSSID.length() == 0) {
+    startConfigMode();
+    return;
+  }
+
+  if (connectWiFi()) {
+    // Register device in Supabase
+    deviceRegistered = registerDevice();
+    if (deviceRegistered) {
+      updateStatus("online");
+      setLedOk();
+      Serial.println("Online!");
+    } else {
+      setLedError();
+      Serial.println("Registration failed");
+    }
+  } else {
+    Serial.println("WiFi failed, entering setup mode...");
+    startConfigMode();
+  }
+}
+
+// ---- LOOP ----
+void loop() {
+  if (setupMode) {
+    server.handleClient();
+    updateLeds();
+    delay(10);
+    return;
+  }
+
+  checkResetButton();
+  updateLeds();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    WiFi.reconnect();
+    delay(5000);
+    setLedError();
+    return;
+  }
+
+  unsigned long now = millis();
+  if (now - lastPoll > 2000) { lastPoll = now; pollCommands(); }
+  if (now - lastHeartbeat > 30000) { lastHeartbeat = now; heartbeat(); }
+
+  delay(10);
 }
