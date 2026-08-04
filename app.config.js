@@ -9,7 +9,10 @@ export default {
     userInterfaceStyle: "automatic",
     extra: {
       supabaseUrl: "https://ggqjcyqwevpsbrbcuriv.supabase.co",
-      supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdncWpjeXF3ZXZwc2JyYmN1cml2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3MzcxODAsImV4cCI6MjEwMTMxMzE4MH0.MsqHSSzpihfe-evFlq51l8v-S0DfVUPPlK0DICxiRH4"
+      supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdncWpjeXF3ZXZwc2JyYmN1cml2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3MzcxODAsImV4cCI6MjEwMTMxMzE4MH0.MsqHSSzpihfe-evFlq51l8v-S0DfVUPPlK0DICxiRH4",
+      eas: {
+        projectId: "7c8c43df-3f90-4de0-895d-cefe193e38ee"
+      }
     },
     ios: {
       supportsTablet: true,

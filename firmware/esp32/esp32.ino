@@ -15,7 +15,6 @@
 
 #define GPIO_POWER 26
 #define GPIO_RESET 27
-#define GPIO_SHUTDOWN 25
 
 unsigned long lastPoll = 0;
 unsigned long lastHeartbeat = 0;
@@ -27,10 +26,8 @@ void setup() {
 
   pinMode(GPIO_POWER, OUTPUT);
   pinMode(GPIO_RESET, OUTPUT);
-  pinMode(GPIO_SHUTDOWN, OUTPUT);
   digitalWrite(GPIO_POWER, LOW);
   digitalWrite(GPIO_RESET, LOW);
-  digitalWrite(GPIO_SHUTDOWN, LOW);
   Serial.println("GPIO OK");
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -128,7 +125,7 @@ void pollCommands() {
     Serial.print("CMD: ");
     Serial.println(cmdType);
     
-    // Execute
+    // Execute - pulse HIGH to simulate button press
     if (strcmp(cmdType, "power") == 0) {
       digitalWrite(GPIO_POWER, HIGH);
       delay(300);
@@ -137,10 +134,6 @@ void pollCommands() {
       digitalWrite(GPIO_RESET, HIGH);
       delay(300);
       digitalWrite(GPIO_RESET, LOW);
-    } else if (strcmp(cmdType, "shutdown") == 0 || strcmp(cmdType, "restart") == 0) {
-      digitalWrite(GPIO_SHUTDOWN, HIGH);
-      delay(5000);
-      digitalWrite(GPIO_SHUTDOWN, LOW);
     }
     
     // Update command status
