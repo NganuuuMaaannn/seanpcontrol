@@ -35,7 +35,7 @@ export const authApi = {
   },
 
   async signOut(): Promise<void> {
-    await AsyncStorage.removeItem('auth_session');
+    await AsyncStorage.multiRemove(['auth_session', 'username']);
     supabaseClient.setAccessToken(null);
   },
 
@@ -43,9 +43,59 @@ export const authApi = {
     try {
       const json = await AsyncStorage.getItem('auth_session');
       if (json) {
-        const session: AuthSession = JSON.parse(json);
+        let session: AuthSession = JSON.parse(json);
+
+        // Check if token is expired
+        if (this.isTokenExpired(session.access_token)) {
+          // Try to refresh
+          const refreshed = await this.refreshToken(session.refresh_token);
+          if (refreshed) {
+            session = refreshed;
+            await this.saveSession(session);
+          } else {
+            // Refresh failed, clear session
+            await this.signOut();
+            return null;
+          }
+        }
+
         supabaseClient.setAccessToken(session.access_token);
         return session;
+      }
+    } catch {}
+    return null;
+  },
+
+  isTokenExpired(token: string): boolean {
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return true;
+      const payload = JSON.parse(atob(parts[1]));
+      const exp = payload.exp * 1000; // convert to ms
+      return Date.now() >= exp;
+    } catch {
+      return true;
+    }
+  },
+
+  async refreshToken(refreshToken: string): Promise<AuthSession | null> {
+    try {
+      const res = await fetch(`${supabaseClient['baseUrl']}/auth/v1/token?grant_type=refresh_token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseClient['anonKey'],
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+          user: data.user,
+        };
       }
     } catch {}
     return null;

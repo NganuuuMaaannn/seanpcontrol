@@ -4,7 +4,7 @@ export default {
     slug: "SeanPControl",
     version: "1.0.0",
     orientation: "portrait",
-    icon: "./assets/images/icon.png",
+    icon: "./assets/images/seanpcontrol-icon.png",
     scheme: "seanpcontrol",
     userInterfaceStyle: "automatic",
     extra: {
@@ -20,7 +20,7 @@ export default {
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: "./assets/images/android-icon-foreground.png",
+        foregroundImage: "./assets/images/seanpcontrol2.png",
         backgroundColor: "#E6F4FE"
       },
       package: "com.seanpcontrol.app"
@@ -30,11 +30,12 @@ export default {
       [
         "expo-splash-screen",
         {
-          backgroundColor: "#208AEF",
-          image: "./assets/images/splash-icon.png",
+          backgroundColor: "#E6F4FE",
+          image: "./assets/images/seanpcontrol-splash-icon.png",
           imageWidth: 76
         }
-      ]
+      ],
+      "./withNetworkSecurityConfig"
     ]
   }
 };

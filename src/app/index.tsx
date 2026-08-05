@@ -333,7 +333,7 @@ function DeviceControlModal({ device, onClose }: { device: Device | null; onClos
   const lastSeen = deviceService.formatLastSeen(device.last_seen);
 
   return (
-    <View style={styles.modalContainer}>
+    <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
       <View style={styles.modalHeader}>
         <TouchableOpacity onPress={onClose}>
           <Text style={styles.modalClose}>Back</Text>
@@ -379,7 +379,7 @@ function DeviceControlModal({ device, onClose }: { device: Device | null; onClos
 
       {/* Command History Modal */}
       <Modal visible={showCmdHistory} animationType="slide" presentationStyle="pageSheet">
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
           <View style={styles.modalHeader}>
             <TouchableOpacity onPress={() => setShowCmdHistory(false)}>
               <Text style={styles.modalClose}>Back</Text>
