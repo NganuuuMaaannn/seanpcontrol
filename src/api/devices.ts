@@ -29,7 +29,7 @@ export const devicesApi = {
     id: string,
     updates: Partial<Device>
   ): Promise<ApiResponse<Device>> {
-    return supabaseClient.put<Device>(
+    return supabaseClient.patch<Device>(
       `${API_ENDPOINTS.DEVICES}?id=eq.${id}`,
       updates
     );

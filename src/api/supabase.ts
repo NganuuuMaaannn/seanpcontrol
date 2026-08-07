@@ -121,6 +121,10 @@ class SupabaseClient {
     return this.request<T>('PUT', endpoint, body);
   }
 
+  async patch<T>(endpoint: string, body: any): Promise<ApiResponse<T>> {
+    return this.request<T>('PATCH', endpoint, body);
+  }
+
   async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
     return this.request<T>('DELETE', endpoint);
   }

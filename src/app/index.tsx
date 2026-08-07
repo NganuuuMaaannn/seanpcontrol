@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,8 +8,7 @@ import {
   RefreshControl,
   Modal,
   BackHandler,
-  Animated,
-  PanResponder,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDeviceCommands } from '@/hooks/useDeviceCommands';
@@ -22,77 +21,6 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 import LoginScreen from './login';
 import SetupScreen from './setup';
 
-// ---- Swipeable Device Card ----
-function SwipeableCard({
-  device,
-  onPress,
-  onDelete,
-}: {
-  device: Device;
-  onPress: () => void;
-  onDelete: () => void;
-}) {
-  const translateX = useRef(new Animated.Value(0)).current;
-  const deleteWidth = 90;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) =>
-        Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
-      onPanResponderMove: (_, gestureState) => {
-        const newValue = Math.min(0, Math.max(-deleteWidth, gestureState.dx));
-        translateX.setValue(newValue);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx < -40) {
-          Animated.spring(translateX, { toValue: -deleteWidth, useNativeDriver: false }).start();
-        } else {
-          Animated.spring(translateX, { toValue: 0, useNativeDriver: false }).start();
-        }
-      },
-    })
-  ).current;
-
-  const isOnline = device.status === 'online';
-  const statusColor = deviceService.getDeviceStatusColor(device.status);
-  const signalLabel = deviceService.getSignalStrengthLabel(device.wifi_signal);
-  const lastSeen = deviceService.formatLastSeen(device.last_seen);
-
-  return (
-    <View style={styles.cardWrapper}>
-      <View style={styles.deleteBehind}>
-        <TouchableOpacity style={styles.deleteBtn} onPress={onDelete}>
-          <Text style={styles.deleteBtnText}>Delete</Text>
-        </TouchableOpacity>
-      </View>
-      <Animated.View
-        style={[styles.card, { transform: [{ translateX }] }]}
-        {...panResponder.panHandlers}
-      >
-        <TouchableOpacity
-          style={styles.cardTouchable}
-          onPress={onPress}
-          activeOpacity={0.7}
-        >
-          <View style={styles.cardContent}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.deviceName} numberOfLines={1}>{device.device_name}</Text>
-              <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-            </View>
-            <View style={styles.cardInfo}>
-              <Text style={[styles.statusText, { color: statusColor }]}>
-                {isOnline ? 'Online' : 'Offline'}
-              </Text>
-              <Text style={styles.signalText}>{signalLabel}</Text>
-            </View>
-            <Text style={styles.lastSeenText}>Last seen: {lastSeen}</Text>
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
-  );
-}
-
 export default function IndexScreen() {
   const insets = useSafeAreaInsets();
   const [devices, setDevices] = useState<Device[]>([]);
@@ -104,9 +32,16 @@ export default function IndexScreen() {
   const [authLoading, setAuthLoading] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
   const [username, setUsername] = useState('');
+
+  const [contextDevice, setContextDevice] = useState<Device | null>(null);
+  const [showContextModal, setShowContextModal] = useState(false);
+
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editingDevice, setEditingDevice] = useState<Device | null>(null);
+
   const [deletingDevice, setDeletingDevice] = useState<Device | null>(null);
 
-  // Check auth on mount
   useEffect(() => {
     const checkAuth = async () => {
       const session = await authApi.loadSession();
@@ -148,8 +83,38 @@ export default function IndexScreen() {
     setDevices([]);
   }, []);
 
-  const handleDelete = useCallback(async (device: Device) => {
-    setDeletingDevice(device);
+  const handleDevicePress = useCallback((device: Device) => {
+    setSelectedDevice(device);
+    setShowHistory(true);
+  }, []);
+
+  const handleLongPress = useCallback((device: Device) => {
+    setContextDevice(device);
+    setShowContextModal(true);
+  }, []);
+
+  const handleEdit = useCallback(() => {
+    if (!contextDevice) return;
+    setEditingDevice(contextDevice);
+    setEditName(contextDevice.device_name);
+    setShowContextModal(false);
+    setShowEditModal(true);
+  }, [contextDevice]);
+
+  const handleConfirmEdit = useCallback(async () => {
+    if (!editingDevice || !editName.trim()) return;
+    try {
+      await devicesApi.update(editingDevice.id, { device_name: editName.trim() });
+      setDevices(prev => prev.map(d => d.id === editingDevice.id ? { ...d, device_name: editName.trim() } : d));
+    } catch (err) {
+      console.error('Failed to rename:', err);
+    }
+    setShowEditModal(false);
+    setEditingDevice(null);
+  }, [editingDevice, editName]);
+
+  const handleDelete = useCallback(() => {
+    setShowContextModal(false);
   }, []);
 
   const confirmDelete = useCallback(async () => {
@@ -163,20 +128,34 @@ export default function IndexScreen() {
     setDeletingDevice(null);
   }, [deletingDevice]);
 
-  const handleDevicePress = useCallback((device: Device) => {
-    setSelectedDevice(device);
-    setShowHistory(true);
-  }, []);
+  const renderDevice = useCallback(({ item }: { item: Device }) => {
+    const isOnline = item.status === 'online';
+    const statusColor = deviceService.getDeviceStatusColor(item.status);
+    const signalLabel = deviceService.getSignalStrengthLabel(item.wifi_signal);
+    const lastSeen = deviceService.formatLastSeen(item.last_seen);
 
-  const renderDevice = useCallback(({ item }: { item: Device }) => (
-    <SwipeableCard
-      device={item}
-      onPress={() => handleDevicePress(item)}
-      onDelete={() => handleDelete(item)}
-    />
-  ), [handleDevicePress, handleDelete]);
+    return (
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => handleDevicePress(item)}
+        onLongPress={() => handleLongPress(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.cardHeader}>
+          <Text style={styles.deviceName} numberOfLines={1}>{item.device_name}</Text>
+          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+        </View>
+        <View style={styles.cardInfo}>
+          <Text style={[styles.statusText, { color: statusColor }]}>
+            {isOnline ? 'Online' : 'Offline'}
+          </Text>
+          <Text style={styles.signalText}>{signalLabel}</Text>
+        </View>
+        <Text style={styles.lastSeenText}>Last seen: {lastSeen}</Text>
+      </TouchableOpacity>
+    );
+  }, [handleDevicePress, handleLongPress]);
 
-  // Auth loading
   if (authLoading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -185,17 +164,14 @@ export default function IndexScreen() {
     );
   }
 
-  // Not logged in
   if (!isLoggedIn) {
     return <LoginScreen onLogin={() => setIsLoggedIn(true)} />;
   }
 
-  // Show setup screen
   if (showSetup) {
     return <SetupScreen onComplete={() => { setShowSetup(false); fetchDevices(); }} onCancel={() => setShowSetup(false)} />;
   }
 
-  // Loading devices
   if (loading && devices.length === 0) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -257,6 +233,64 @@ export default function IndexScreen() {
         </TouchableOpacity>
       </Modal>
 
+      {/* Device Context Modal (Edit / Delete) */}
+      <Modal visible={showContextModal} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.deleteOverlay}
+          activeOpacity={1}
+          onPress={() => setShowContextModal(false)}
+        >
+          <View style={styles.contextModal}>
+            <Text style={styles.contextTitle}>{contextDevice?.device_name}</Text>
+            <TouchableOpacity style={styles.contextOption} onPress={handleEdit}>
+              <Text style={styles.contextEditText}>Edit</Text>
+            </TouchableOpacity>
+            <View style={styles.contextDivider} />
+            <TouchableOpacity
+              style={styles.contextOption}
+              onPress={() => {
+                setDeletingDevice(contextDevice);
+                setShowContextModal(false);
+              }}
+            >
+              <Text style={styles.contextDeleteText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Edit Name Modal */}
+      <Modal visible={showEditModal} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.deleteOverlay}
+          activeOpacity={1}
+          onPress={() => setShowEditModal(false)}
+        >
+          <View style={styles.editModal}>
+            <Text style={styles.editTitle}>Rename Device</Text>
+            <TextInput
+              style={styles.editInput}
+              placeholder="Device name"
+              value={editName}
+              onChangeText={setEditName}
+              autoFocus
+            />
+            <View style={styles.editButtons}>
+              <TouchableOpacity style={styles.editCancelBtn} onPress={() => setShowEditModal(false)}>
+                <Text style={styles.editCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.editConfirmBtn, !editName.trim() && styles.buttonDisabled]}
+                onPress={handleConfirmEdit}
+                disabled={!editName.trim()}
+              >
+                <Text style={styles.editConfirmText}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Delete Confirmation Modal */}
       <Modal visible={!!deletingDevice} transparent animationType="fade">
         <TouchableOpacity
@@ -270,16 +304,10 @@ export default function IndexScreen() {
               Remove "{deletingDevice?.device_name}" from your devices?
             </Text>
             <View style={styles.deleteButtons}>
-              <TouchableOpacity
-                style={styles.deleteCancelBtn}
-                onPress={() => setDeletingDevice(null)}
-              >
+              <TouchableOpacity style={styles.deleteCancelBtn} onPress={() => setDeletingDevice(null)}>
                 <Text style={styles.deleteCancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deleteConfirmBtn}
-                onPress={confirmDelete}
-              >
+              <TouchableOpacity style={styles.deleteConfirmBtn} onPress={confirmDelete}>
                 <Text style={styles.deleteConfirmText}>Delete</Text>
               </TouchableOpacity>
             </View>
@@ -303,7 +331,6 @@ function DeviceControlModal({ device, onClose }: { device: Device | null; onClos
   const insets = useSafeAreaInsets();
   const [showCmdHistory, setShowCmdHistory] = useState(false);
 
-  // Handle Android back button
   useEffect(() => {
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
       if (showCmdHistory) {
@@ -422,21 +449,58 @@ const styles = StyleSheet.create({
   logoutBtn: { padding: SPACING.md, alignItems: 'center' },
   logoutText: { ...TYPOGRAPHY.body, color: COLORS.danger, fontWeight: '600' },
   list: { padding: SPACING.md },
-  cardWrapper: { marginBottom: SPACING.md, height: 110 },
-  deleteBehind: {
-    position: 'absolute', right: 0, top: 0, bottom: 0,
-    width: 80, backgroundColor: COLORS.danger,
-    borderRadius: BORDER_RADIUS.lg, justifyContent: 'center', alignItems: 'center',
-  },
-  deleteBtn: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  deleteBtnText: { ...TYPOGRAPHY.caption, color: COLORS.surface, fontWeight: '700' },
   card: {
     backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md, height: 110, marginRight: 5, ...SHADOWS.sm,
+    padding: SPACING.md, marginBottom: SPACING.md, height: 110, ...SHADOWS.sm,
   },
-  cardContent: { flex: 1, justifyContent: 'center' },
-  cardTouchable: { flex: 1 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
+  deviceName: { ...TYPOGRAPHY.h3, color: COLORS.text, flex: 1 },
+  statusDot: { width: 12, height: 12, borderRadius: 6 },
+  cardInfo: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: SPACING.xs },
+  statusText: { ...TYPOGRAPHY.body, fontWeight: '600', marginTop: -2 },
+  signalText: { ...TYPOGRAPHY.body, color: COLORS.textSecondary },
+  lastSeenText: { ...TYPOGRAPHY.caption, color: COLORS.textSecondary },
+  emptyContainer: { alignItems: 'center', marginTop: SPACING.xxl * 2 },
+  emptyText: { ...TYPOGRAPHY.h3, color: COLORS.textSecondary, marginBottom: SPACING.sm },
+  emptyHint: { ...TYPOGRAPHY.caption, color: COLORS.textSecondary },
+  addButton: {
+    position: 'absolute', right: SPACING.lg, width: 56, height: 56,
+    borderRadius: 28, backgroundColor: COLORS.primary,
+    justifyContent: 'center', alignItems: 'center', ...SHADOWS.lg,
+  },
+  addIcon: { fontSize: 32, color: COLORS.surface, fontWeight: '300', marginTop: -2 },
+
+  // Context Modal
   deleteOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  contextModal: {
+    backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.lg,
+    width: '70%', ...SHADOWS.lg, overflow: 'hidden',
+  },
+  contextTitle: { ...TYPOGRAPHY.h3, color: COLORS.text, textAlign: 'center', padding: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  contextOption: { padding: SPACING.md, alignItems: 'center' },
+  contextEditText: { ...TYPOGRAPHY.body, color: COLORS.primary, fontWeight: '600' },
+  contextDeleteText: { ...TYPOGRAPHY.body, color: COLORS.danger, fontWeight: '600' },
+  contextDivider: { height: 1, backgroundColor: COLORS.border },
+
+  // Edit Modal
+  editModal: {
+    backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.lg, width: '80%', ...SHADOWS.lg,
+  },
+  editTitle: { ...TYPOGRAPHY.h2, color: COLORS.text, marginBottom: SPACING.md },
+  editInput: {
+    backgroundColor: COLORS.background, borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md, fontSize: 16, marginBottom: SPACING.md,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  editButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: SPACING.md },
+  editCancelBtn: { padding: SPACING.sm },
+  editCancelText: { ...TYPOGRAPHY.body, color: COLORS.textSecondary },
+  editConfirmBtn: { padding: SPACING.sm },
+  editConfirmText: { ...TYPOGRAPHY.body, color: COLORS.primary, fontWeight: '700' },
+  buttonDisabled: { opacity: 0.4 },
+
+  // Delete Modal
   deleteModal: {
     backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.lg, width: '80%', ...SHADOWS.lg,
@@ -448,27 +512,12 @@ const styles = StyleSheet.create({
   deleteCancelText: { ...TYPOGRAPHY.body, color: COLORS.textSecondary },
   deleteConfirmBtn: { padding: SPACING.sm },
   deleteConfirmText: { ...TYPOGRAPHY.body, color: COLORS.danger, fontWeight: '700' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
-  deviceName: { ...TYPOGRAPHY.h3, color: COLORS.text, flex: 1 },
-  statusDot: { width: 12, height: 12, borderRadius: 6 },
-  cardInfo: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: SPACING.xs },
-  statusText: { ...TYPOGRAPHY.body, fontWeight: '600', marginTop: -2 },
-  signalText: { ...TYPOGRAPHY.body, color: COLORS.textSecondary, },
-  lastSeenText: { ...TYPOGRAPHY.caption, color: COLORS.textSecondary },
-  emptyContainer: { alignItems: 'center', marginTop: SPACING.xxl * 2 },
-  emptyText: { ...TYPOGRAPHY.h3, color: COLORS.textSecondary, marginBottom: SPACING.sm },
-  emptyHint: { ...TYPOGRAPHY.caption, color: COLORS.textSecondary },
-  addButton: {
-    position: 'absolute', right: SPACING.lg, width: 56, height: 56,
-    borderRadius: 28, backgroundColor: COLORS.primary,
-    justifyContent: 'center', alignItems: 'center', ...SHADOWS.lg,
-  },
-  addIcon: { fontSize: 32, color: COLORS.surface, fontWeight: '300', marginTop: -2 },
-  // Modal styles
-  modalContainer: { flex: 1,},
+
+  // Device Control Modal
+  modalContainer: { flex: 1 },
   modalHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    padding: SPACING.md, 
+    padding: SPACING.md,
   },
   modalTitle: { ...TYPOGRAPHY.h3, color: COLORS.text, flex: 1, textAlign: 'center' },
   modalClose: { ...TYPOGRAPHY.body, color: COLORS.primary, minWidth: 50 },

@@ -10,8 +10,8 @@
 // ---- PIN CONFIG ----
 #define GPIO_POWER    26
 #define GPIO_RESET    27
-#define LED_GREEN     32
-#define LED_RED       33
+#define LED_GREEN     33
+#define LED_RED       32
 #define BTN_RESET     25
 
 // ---- HOTSPOT CONFIG ----
@@ -41,31 +41,38 @@ bool deviceRegistered = false;
 unsigned long resetPressStart = 0;
 bool resetPressed = false;
 
-enum DeviceStatus { STATUS_OK, STATUS_ERROR, STATUS_RESETTING, STATUS_CONFIG };
-DeviceStatus currentStatus = STATUS_OK;
+enum DeviceStatus { STATUS_CONNECTING, STATUS_OK, STATUS_ERROR, STATUS_CONFIG, STATUS_COMMAND };
+DeviceStatus currentStatus = STATUS_CONNECTING;
+
+unsigned long greenFlashUntil = 0;
+int cmdPhase = 0;
+unsigned long cmdPhaseStart = 0;
+const unsigned long CMD_PATTERN[] = {500, 100, 100, 100, 100, 100};
+const int CMD_PHASES = 6;
 
 // ---- LED ----
+void setLedConnecting() { currentStatus = STATUS_CONNECTING; }
 void setLedOk() { currentStatus = STATUS_OK; }
 void setLedError() { currentStatus = STATUS_ERROR; }
-void setLedReset() { currentStatus = STATUS_RESETTING; }
 void setLedConfig() { currentStatus = STATUS_CONFIG; }
+void setLedCommand() { currentStatus = STATUS_COMMAND; cmdPhase = 0; cmdPhaseStart = millis(); }
+void flashGreen(unsigned long ms) { greenFlashUntil = millis() + ms; }
 
 void updateLeds() {
   unsigned long now = millis();
+
+  // Green flash override (heartbeat)
+  if (greenFlashUntil > 0 && now < greenFlashUntil) {
+    digitalWrite(LED_GREEN, HIGH);
+    digitalWrite(LED_RED, LOW);
+    return;
+  }
+  if (greenFlashUntil > 0 && now >= greenFlashUntil) {
+    greenFlashUntil = 0;
+  }
+
   switch (currentStatus) {
-    case STATUS_OK:
-      if (now - lastLedBlink > 1000) {
-        lastLedBlink = now;
-        ledState = !ledState;
-        digitalWrite(LED_GREEN, ledState ? HIGH : LOW);
-        digitalWrite(LED_RED, LOW);
-      }
-      break;
-    case STATUS_ERROR:
-      digitalWrite(LED_RED, HIGH);
-      digitalWrite(LED_GREEN, LOW);
-      break;
-    case STATUS_RESETTING:
+    case STATUS_CONNECTING:
       if (now - lastLedBlink > 200) {
         lastLedBlink = now;
         ledState = !ledState;
@@ -73,12 +80,41 @@ void updateLeds() {
         digitalWrite(LED_GREEN, LOW);
       }
       break;
+    case STATUS_OK:
+      if (now - lastLedBlink > 1000) {
+        lastLedBlink = now;
+        digitalWrite(LED_RED, HIGH);
+        digitalWrite(LED_GREEN, LOW);
+        delay(50);
+        digitalWrite(LED_RED, LOW);
+      }
+      break;
+    case STATUS_ERROR:
+      digitalWrite(LED_RED, HIGH);
+      digitalWrite(LED_GREEN, LOW);
+      break;
     case STATUS_CONFIG:
       if (now - lastLedBlink > 500) {
         lastLedBlink = now;
         ledState = !ledState;
         digitalWrite(LED_GREEN, ledState ? HIGH : LOW);
         digitalWrite(LED_RED, ledState ? LOW : HIGH);
+      }
+      break;
+    case STATUS_COMMAND:
+      {
+        unsigned long elapsed = now - cmdPhaseStart;
+        if (cmdPhase < CMD_PHASES && elapsed >= CMD_PATTERN[cmdPhase]) {
+          cmdPhase++;
+          cmdPhaseStart = now;
+          if (cmdPhase < CMD_PHASES) {
+            digitalWrite(LED_GREEN, (cmdPhase % 2 == 0) ? HIGH : LOW);
+          }
+        }
+        if (cmdPhase >= CMD_PHASES) {
+          digitalWrite(LED_GREEN, LOW);
+          currentStatus = STATUS_OK;
+        }
       }
       break;
   }
@@ -317,10 +353,12 @@ void pollCommands() {
 
     if (strcmp(cmdType, "power") == 0) {
       digitalWrite(GPIO_POWER, HIGH);
+      setLedCommand();
       delay(500);
       digitalWrite(GPIO_POWER, LOW);
     } else if (strcmp(cmdType, "reset") == 0) {
       digitalWrite(GPIO_RESET, HIGH);
+      setLedCommand();
       delay(500);
       digitalWrite(GPIO_RESET, LOW);
     }
@@ -343,7 +381,7 @@ void heartbeat() {
   if (WiFi.status() != WL_CONNECTED) { setLedError(); return; }
   updateStatus("online");
   Serial.println("HB");
-  setLedOk();
+  flashGreen(200);
 }
 
 // ---- RESET BUTTON ----
@@ -352,7 +390,6 @@ void checkResetButton() {
   if (pressed && !resetPressed) { resetPressStart = millis(); resetPressed = true; }
   if (resetPressed && pressed && (millis() - resetPressStart >= 5000)) {
     Serial.println("Reset!");
-    setLedReset();
     for (int i = 0; i < 10; i++) { digitalWrite(LED_RED, HIGH); delay(100); digitalWrite(LED_RED, LOW); delay(100); }
     preferences.begin("config", false); preferences.clear(); preferences.end();
     ESP.restart();
@@ -374,7 +411,7 @@ void setup() {
   digitalWrite(GPIO_POWER, LOW);
   digitalWrite(GPIO_RESET, LOW);
   digitalWrite(LED_GREEN, LOW);
-  digitalWrite(LED_RED, LOW);
+  digitalWrite(LED_RED, HIGH);
 
   // Load config
   preferences.begin("config", true);
@@ -395,13 +432,18 @@ void setup() {
     return;
   }
 
+  setLedConnecting();
+
   if (connectWiFi()) {
-    // Register device in Supabase
     deviceRegistered = registerDevice();
     if (deviceRegistered) {
       updateStatus("online");
-      setLedOk();
       Serial.println("Online!");
+      digitalWrite(LED_RED, LOW);
+      digitalWrite(LED_GREEN, HIGH);
+      delay(2000);
+      digitalWrite(LED_GREEN, LOW);
+      setLedOk();
     } else {
       setLedError();
       Serial.println("Registration failed");
@@ -425,9 +467,14 @@ void loop() {
   updateLeds();
 
   if (WiFi.status() != WL_CONNECTED) {
+    setLedConnecting();
     WiFi.reconnect();
     delay(5000);
-    setLedError();
+    if (WiFi.status() == WL_CONNECTED) {
+      setLedOk();
+    } else {
+      setLedError();
+    }
     return;
   }
 

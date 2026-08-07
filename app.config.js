@@ -21,7 +21,7 @@ export default {
     android: {
       adaptiveIcon: {
         foregroundImage: "./assets/images/seanpcontrol2.png",
-        backgroundColor: "#E6F4FE"
+        backgroundColor: "#F8FAFC"
       },
       package: "com.seanpcontrol.app"
     },
@@ -30,8 +30,8 @@ export default {
       [
         "expo-splash-screen",
         {
-          backgroundColor: "#E6F4FE",
-          image: "./assets/images/seanpcontrol-splash-icon.png",
+          backgroundColor: "#F8FAFC",
+          image: "./assets/images/seanpcontrol-splash-icon2.png",
           imageWidth: 76
         }
       ],
