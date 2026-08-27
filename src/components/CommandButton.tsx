@@ -6,7 +6,7 @@ import { COLORS, SPACING, BORDER_RADIUS, SHADOWS, TYPOGRAPHY } from '@/constants
 
 interface CommandButtonProps {
   command: CommandType;
-  onPress: () => Promise<void>;
+  onPress: () => Promise<boolean | void>;
   disabled?: boolean;
   loading?: boolean;
   size?: 'small' | 'medium' | 'large';

@@ -18,7 +18,7 @@ serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { command_id, status, error_message } = await req.json();
+    const { command_id, status } = await req.json();
 
     if (!command_id || !status) {
       return new Response(
@@ -46,10 +46,6 @@ serve(async (req: Request) => {
       status: status,
       executed_at: new Date().toISOString(),
     };
-
-    if (error_message) {
-      updateData.error_message = error_message;
-    }
 
     const { data, error } = await supabase
       .from("commands")

@@ -60,7 +60,7 @@ HttpResponse HttpClient::executeRequest(HttpMethod method, const String& url, co
     } else {
       if (DEBUG_SERIAL) {
         Serial.printf("[HTTP] Request failed (attempt %d/%d): %s\n",
-                      attempt + 1, maxRettries, http.errorToString(httpCode).c_str());
+                      attempt + 1, maxRetries, http.errorToString(httpCode).c_str());
       }
       response.error = http.errorToString(httpCode);
       http.end();

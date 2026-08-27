@@ -11,11 +11,13 @@ export default function RootLayout() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: COLORS.background },
+          animation: 'slide_from_right',
         }}
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />
         <Stack.Screen name="setup" />
+        <Stack.Screen name="device-details" />
       </Stack>
     </SafeAreaProvider>
   );

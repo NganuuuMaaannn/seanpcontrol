@@ -38,6 +38,14 @@ class SupabaseClient {
     return this.accessToken;
   }
 
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  getAnonKey(): string {
+    return this.anonKey;
+  }
+
   private async request<T>(
     method: string,
     endpoint: string,

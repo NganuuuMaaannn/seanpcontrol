@@ -66,6 +66,15 @@ class DeviceService {
     return 'Very Weak';
   }
 
+  getSignalStrengthColor(signal: number | undefined): string {
+    if (signal === undefined || signal === null) return '#6B7280';
+    if (signal >= -50) return '#10B981';
+    if (signal >= -60) return '#34D399';
+    if (signal >= -70) return '#F59E0B';
+    if (signal >= -80) return '#F97316';
+    return '#EF4444';
+  }
+
   formatLastSeen(lastSeen: string | undefined): string {
     if (!lastSeen) return 'Never';
     try {

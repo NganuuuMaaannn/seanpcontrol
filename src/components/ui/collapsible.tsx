@@ -12,7 +12,7 @@ export function Collapsible({ children, title }: PropsWithChildren & { title: st
         style={({ pressed }) => [styles.heading, pressed && styles.pressedHeading]}
         onPress={() => setIsOpen((value) => !value)}>
         <View style={styles.button}>
-          <Text style={styles.chevron}>{isOpen ? '>' : '>'}</Text>
+          <Text style={styles.chevron}>{isOpen ? '\u25BC' : '\u25B6'}</Text>
         </View>
 
         <Text style={styles.title}>{title}</Text>

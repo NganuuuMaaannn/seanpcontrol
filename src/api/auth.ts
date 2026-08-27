@@ -80,11 +80,11 @@ export const authApi = {
 
   async refreshToken(refreshToken: string): Promise<AuthSession | null> {
     try {
-      const res = await fetch(`${supabaseClient['baseUrl']}/auth/v1/token?grant_type=refresh_token`, {
+      const res = await fetch(`${supabaseClient.getBaseUrl()}/auth/v1/token?grant_type=refresh_token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          apikey: supabaseClient['anonKey'],
+          apikey: supabaseClient.getAnonKey(),
         },
         body: JSON.stringify({ refresh_token: refreshToken }),
       });

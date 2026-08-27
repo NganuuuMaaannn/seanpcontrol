@@ -73,20 +73,33 @@ void updateLeds() {
 
   switch (currentStatus) {
     case STATUS_CONNECTING:
-      if (now - lastLedBlink > 200) {
-        lastLedBlink = now;
-        ledState = !ledState;
-        digitalWrite(LED_RED, ledState ? HIGH : LOW);
+      {
+        unsigned long elapsed = now - lastLedBlink;
+        if (!ledState && elapsed > 5000) {
+          ledState = true;
+          lastLedBlink = now;
+          digitalWrite(LED_RED, HIGH);
+        } else if (ledState && elapsed > 200) {
+          ledState = false;
+          lastLedBlink = now;
+          digitalWrite(LED_RED, LOW);
+        }
         digitalWrite(LED_GREEN, LOW);
       }
       break;
     case STATUS_OK:
-      if (now - lastLedBlink > 1000) {
-        lastLedBlink = now;
-        digitalWrite(LED_RED, HIGH);
-        digitalWrite(LED_GREEN, LOW);
-        delay(50);
-        digitalWrite(LED_RED, LOW);
+      {
+        unsigned long elapsed = now - lastLedBlink;
+        if (!ledState && elapsed > 5000) {
+          ledState = true;
+          lastLedBlink = now;
+          digitalWrite(LED_RED, HIGH);
+          digitalWrite(LED_GREEN, LOW);
+        } else if (ledState && elapsed > 200) {
+          ledState = false;
+          lastLedBlink = now;
+          digitalWrite(LED_RED, LOW);
+        }
       }
       break;
     case STATUS_ERROR:
@@ -322,7 +335,7 @@ void updateStatus(const char* status) {
   http.addHeader("Authorization", "Bearer " + supabaseKey);
   http.addHeader("Content-Type", "application/json");
 
-  String payload = "{\"status\":\"" + String(status) + "\",\"last_seen\":\"now()\",\"ip_address\":\"" + WiFi.localIP().toString() + "\",\"wifi_signal\":" + String(WiFi.RSSI()) + "}";
+  String payload = "{\"status\":\"" + String(status) + "\",\"ip_address\":\"" + WiFi.localIP().toString() + "\",\"wifi_signal\":" + String(WiFi.RSSI()) + "}";
   http.sendRequest("PATCH", payload);
   http.end();
 }
@@ -369,7 +382,7 @@ void pollCommands() {
     http2.addHeader("apikey", supabaseKey);
     http2.addHeader("Authorization", "Bearer " + supabaseKey);
     http2.addHeader("Content-Type", "application/json");
-    http2.sendRequest("PATCH", "{\"status\":\"completed\",\"executed_at\":\"now()\"}");
+    http2.sendRequest("PATCH", "{\"status\":\"completed\"}");
     http2.end();
     Serial.println("DONE");
   } else {

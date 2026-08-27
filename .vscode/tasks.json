@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Expo Go",
+      "type": "shell",
+      "command": "npx",
+      "args": ["expo", "start"],
+      "group": "build",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "expo"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "CLI",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoExit"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "expo"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "🚀 Launch SeanPControl",
+      "dependsOn": ["Expo Go", "CLI"],
+      "problemMatcher": []
+    }
+  ]
+}

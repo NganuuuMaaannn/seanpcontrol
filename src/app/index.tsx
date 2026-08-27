@@ -7,11 +7,10 @@ import {
   FlatList,
   RefreshControl,
   Modal,
-  BackHandler,
   TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useDeviceCommands } from '@/hooks/useDeviceCommands';
+import { useRouter } from 'expo-router';
 import { COLORS, SPACING, BORDER_RADIUS, TYPOGRAPHY, SHADOWS } from '@/constants/theme';
 import { deviceService } from '@/services/device_service';
 import { Device, Command } from '@/types';
@@ -23,11 +22,10 @@ import SetupScreen from './setup';
 
 export default function IndexScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSetup, setShowSetup] = useState(false);
-  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
@@ -84,9 +82,8 @@ export default function IndexScreen() {
   }, []);
 
   const handleDevicePress = useCallback((device: Device) => {
-    setSelectedDevice(device);
-    setShowHistory(true);
-  }, []);
+    router.push({ pathname: '/device-details', params: { deviceId: device.id } });
+  }, [router]);
 
   const handleLongPress = useCallback((device: Device) => {
     setContextDevice(device);
@@ -132,6 +129,7 @@ export default function IndexScreen() {
     const isOnline = item.status === 'online';
     const statusColor = deviceService.getDeviceStatusColor(item.status);
     const signalLabel = deviceService.getSignalStrengthLabel(item.wifi_signal);
+    const signalColor = deviceService.getSignalStrengthColor(item.wifi_signal);
     const lastSeen = deviceService.formatLastSeen(item.last_seen);
 
     return (
@@ -149,7 +147,7 @@ export default function IndexScreen() {
           <Text style={[styles.statusText, { color: statusColor }]}>
             {isOnline ? 'Online' : 'Offline'}
           </Text>
-          <Text style={styles.signalText}>{signalLabel}</Text>
+          <Text style={[styles.signalText, { color: signalColor }]}>{signalLabel}</Text>
         </View>
         <Text style={styles.lastSeenText}>Last seen: {lastSeen}</Text>
       </TouchableOpacity>
@@ -315,120 +313,6 @@ export default function IndexScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Device Control Modal */}
-      <Modal visible={showHistory} animationType="slide" presentationStyle="pageSheet">
-        <DeviceControlModal
-          device={selectedDevice}
-          onClose={() => { setShowHistory(false); setSelectedDevice(null); fetchDevices(); }}
-        />
-      </Modal>
-    </View>
-  );
-}
-
-// ---- Device Control Modal ----
-function DeviceControlModal({ device, onClose }: { device: Device | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
-  const [showCmdHistory, setShowCmdHistory] = useState(false);
-
-  useEffect(() => {
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (showCmdHistory) {
-        setShowCmdHistory(false);
-        return true;
-      }
-      onClose();
-      return true;
-    });
-    return () => backHandler.remove();
-  }, [showCmdHistory, onClose]);
-
-  const {
-    commands,
-    loading: commandsLoading,
-    refreshCommands,
-    sendPowerCommand,
-    sendResetCommand,
-    sending,
-  } = useDeviceCommands(device?.id || '');
-
-  if (!device) return null;
-
-  const isOnline = device.status === 'online';
-  const statusColor = deviceService.getDeviceStatusColor(device.status);
-  const signalLabel = deviceService.getSignalStrengthLabel(device.wifi_signal);
-  const lastSeen = deviceService.formatLastSeen(device.last_seen);
-
-  return (
-    <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
-      <View style={styles.modalHeader}>
-        <TouchableOpacity onPress={onClose}>
-          <Text style={styles.modalClose}>Back</Text>
-        </TouchableOpacity>
-        <View style={{ width: 50 }} />
-      </View>
-
-      <View style={styles.statusBar}>
-        <View style={styles.statusLeft}>
-          <Text style={styles.deviceNameLarge}>{device.device_name}</Text>
-          <Text style={styles.metaText}>Last seen: {lastSeen}</Text>
-          <Text style={styles.metaText}>{signalLabel}</Text>
-        </View>
-        <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-          <Text style={styles.statusTextBadge}>{isOnline ? 'ONLINE' : 'OFFLINE'}</Text>
-        </View>
-      </View>
-
-      <View style={styles.buttonsContainer}>
-        <TouchableOpacity
-          style={[styles.squareButton, styles.powerButton, (!isOnline || sending) && styles.disabledButton]}
-          onPress={sendPowerCommand}
-          disabled={!isOnline || sending}
-        >
-          <Text style={styles.buttonLabel}>POWER</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.squareButton, styles.resetButton, (!isOnline || sending) && styles.disabledButton]}
-          onPress={sendResetCommand}
-          disabled={!isOnline || sending}
-        >
-          <Text style={styles.buttonLabel}>RESET</Text>
-        </TouchableOpacity>
-      </View>
-
-      <TouchableOpacity
-        style={[styles.historyButton, { bottom: insets.bottom + SPACING.md }]}
-        onPress={() => setShowCmdHistory(true)}
-      >
-        <Text style={styles.historyIcon}>🕐</Text>
-      </TouchableOpacity>
-
-      {/* Command History Modal */}
-      <Modal visible={showCmdHistory} animationType="slide" presentationStyle="pageSheet">
-        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowCmdHistory(false)}>
-              <Text style={styles.modalClose}>Back</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Command History</Text>
-            <View style={{ width: 50 }} />
-          </View>
-          <FlatList
-            data={commands}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.historyList}
-            ListEmptyComponent={<Text style={styles.emptyText}>No commands yet</Text>}
-            renderItem={({ item }: { item: Command }) => (
-              <View style={styles.historyItem}>
-                <Text style={styles.historyCommand}>{item.command}</Text>
-                <Text style={[styles.historyStatus, { color: statusColor }]}>{item.status}</Text>
-                <Text style={styles.historyTime}>{new Date(item.created_at).toLocaleTimeString()}</Text>
-              </View>
-            )}
-          />
-        </View>
-      </Modal>
     </View>
   );
 }
